@@ -1,7 +1,9 @@
 #include <iostream>
+#include <algorithm>
 #include <cstdlib>
 #include <stack>
 #include <tuple>
+#include <fstream>
 #include "./delaunay.h"
 
 void make_triangle(halfedge *e_ab,halfedge *e_bc,halfedge *e_ca,face *f){
@@ -31,15 +33,11 @@ std::tuple<face*,face*,halfedge*,halfedge*> flip(face *f_cab,face *f_acd,halfedg
 
   halfedge *e_ab = new halfedge(e_ca->next);
   e_ca->next->new_e = e_ab;
-  assert(!e_ca->inv||e_ca->inv->inv==e_ca);
   halfedge *e_bc = new halfedge(e_ca->next->next);
-  assert(!e_bc->inv||e_bc->inv->inv==e_bc);
   e_ca->next->next->new_e = e_bc;
   halfedge *e_cd = new halfedge(e_ac->next);
-  assert(!e_cd->inv||e_cd->inv->inv==e_cd);
   e_ac->next->new_e = e_cd;
   halfedge *e_da = new halfedge(e_ac->next->next);
-  assert(!e_da->inv||e_da->inv->inv==e_da);
   e_ac->next->next->new_e = e_da;
 
   face *f_abd = new face(e_bd);
@@ -76,13 +74,13 @@ face* super_triangle(const std::vector<std::pair<double,double>> &points) {
   }
   double x1 = minx - (maxy-miny)/std::sqrt(3) - 2.0;
   double y1 = miny - 1.0;
-  vertex *p1 = new vertex(x1,y1);
+  vertex *p1 = new vertex(0,x1,y1);
   double x2 = maxx + (maxy-miny)/std::sqrt(3) + 2.0;
   double y2 = miny - 1.0;
-  vertex *p2 = new vertex(x2,y2);
+  vertex *p2 = new vertex(0,x2,y2);
   double x3 = minx + (maxx-minx)/2;
   double y3 = maxy + (maxx-minx)/2*std::sqrt(3);
-  vertex *p3 = new vertex(x3,y3);
+  vertex *p3 = new vertex(0,x3,y3);
 
   halfedge *e_12 = new halfedge(p1);
   halfedge *e_23 = new halfedge(p2);
@@ -102,12 +100,11 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
   };
   faces.push_back(st);
 
-  int cnt = 1;
+  int id = 0;
   for(const auto &point:points){
-    if((cnt%10000) == 0) {
-      std::cerr << cnt << std::endl;
+    if(((id+1)%10000) == 0) {
+      std::cerr << id+1 << std::endl;
     }
-    cnt++;
 
     face *f = st;
     int d=0;
@@ -125,7 +122,7 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
       }
     }
 
-    vertex *p = new vertex(point.first,point.second);
+    vertex *p = new vertex(id++,point.first,point.second);
 
     halfedge *e_ab = new halfedge(f->e);
     f->e->new_e = e_ab;
@@ -172,25 +169,18 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
     edgestack.push_back(e_bc);
     edgestack.push_back(e_ca);
 
-    assert(!e_ab->inv||e_ab->inv->inv==e_ab);
-    assert(!e_bc->inv||e_bc->inv->inv==e_bc);
-    assert(!e_ca->inv||e_ca->inv->inv==e_ca);
-
     while(!edgestack.empty()){
       halfedge *e_ca = edgestack.back();edgestack.pop_back();
       while(e_ca->new_e){
         e_ca = e_ca->new_e;
       }
       face *f_cab = e_ca->f;
-      assert(f_cab->is_leaf);
 
       if(e_ca->inv == nullptr) continue;
-      assert(e_ca->inv->inv == e_ca);
       halfedge *e_ac = e_ca->inv;
 
       face *f_acd = e_ac->f;
 
-      assert(f_acd->is_leaf);
       if(f_cab->contains(e_ac->next->next->v)){
         face *f_abd,*f_cdb;
         halfedge *e_bd,*e_db;
@@ -205,33 +195,49 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
         halfedge *e_cd = e_bc->next;
 
         edgestack.push_back(e_da);
-        assert(!e_da->inv||e_da->inv->f->is_leaf);
         edgestack.push_back(e_ab);
-        assert(!e_ab->inv||e_ab->inv->f->is_leaf);
         edgestack.push_back(e_bc);
-        assert(!e_bc->inv||e_bc->inv->f->is_leaf);
         edgestack.push_back(e_cd);
-        assert(!e_cd->inv||e_cd->inv->f->is_leaf);
       }
     }
   }
 
-  for(int i=0;i<faces.size();++i){
-    if(!faces[i]->is_leaf) continue;
-    auto zs = faces[i]->get_points();
+  std::ofstream ofs_plot("plot.txt");
+  std::vector<std::vector<size_t>> graph(points.size());
+  for(const auto& f:faces) {
+    if(!f->is_leaf) continue;
+    auto zs = f->get_points();
     bool has_super = false;
     for(int j=0;j<3;++j){
       for(int k=0;k<3;++k){
-        if(zs[j] == stz[k]) {
+        if(zs[j] == stz[k]){
           has_super = true;
           break;
         }
       }
     }
     if(has_super) continue;
-    for(int i=0;i<3;++i) std::cout << zs[i].real() << " " << zs[i].imag() << std::endl;
-    std::cout << zs[0].real() << " " << zs[0].imag() << std::endl;
-    std::cout << std::endl;
+    halfedge *e = f->e;
+    for(int i=0;i<3;++i){
+      graph[e->v->id].push_back(e->next->v->id);
+      graph[e->next->v->id].push_back(e->v->id);
+      e = e->next;
+    }
+    for(int i=0;i<3;++i) ofs_plot << zs[i].real() << " " << zs[i].imag() << std::endl;
+    ofs_plot << zs[0].real() << " " << zs[0].imag() << std::endl;
+    ofs_plot << std::endl;
+  }
+
+  std::ofstream ofs_graph("graph.txt");
+  ofs_graph << graph.size() << std::endl;
+  for(auto &&e:graph){
+    std::sort(std::begin(e),std::end(e));
+    e.erase(std::unique(std::begin(e), std::end(e)), std::end(e));
+    ofs_graph << e.size();
+    for(auto v:e){
+      ofs_graph << " " << v;
+    }
+    ofs_graph << std::endl;
   }
 }
 

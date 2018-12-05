@@ -6,9 +6,10 @@
 #include <cassert>
 
 struct vertex {
+  size_t id;
   std::complex<double> z;
   vertex(const std::complex<double> &z):z(z){}
-  vertex(double x,double y):z(x,y){}
+  vertex(size_t id,double x,double y):id(id),z(x,y){}
   ~vertex(){}
 };
 
