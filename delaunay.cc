@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <stack>
+#include <tuple>
 #include "./delaunay.h"
 
 void make_triangle(halfedge *e_ab,halfedge *e_bc,halfedge *e_ca,face *f){
@@ -13,35 +14,53 @@ void make_triangle(halfedge *e_ab,halfedge *e_bc,halfedge *e_ca,face *f){
   e_ca->f = f;
 }
 
-void flip(face *f_abc,face *f_acd,halfedge **e_ca,halfedge **e_ac) {
-  if((*e_ca)->inv != *e_ac){
+std::tuple<face*,face*,halfedge*,halfedge*> flip(face *f_cab,face *f_acd,halfedge *e_ca,halfedge *e_ac) {
+  if(e_ca->inv != e_ac){
     std::cout << "something wrong in flip" << std::endl;
     std::abort();
   }
 
-  vertex *v_b = (*e_ca)->next->next->v;
+  vertex *v_b = e_ca->next->next->v;
   halfedge *e_bd = new halfedge(v_b);
 
-  vertex *v_d = (*e_ac)->next->next->v;
+  vertex *v_d = e_ac->next->next->v;
   halfedge *e_db = new halfedge(v_d);
 
   e_bd->inv = e_db;
   e_db->inv = e_bd;
 
-  halfedge *e_ab = (*e_ca)->next;
-  halfedge *e_bc = (*e_ca)->next->next;
-  halfedge *e_cd = (*e_ac)->next;
-  halfedge *e_da = (*e_ac)->next->next;
+  halfedge *e_ab = new halfedge(e_ca->next);
+  e_ca->next->new_e = e_ab;
+  assert(!e_ca->inv||e_ca->inv->inv==e_ca);
+  halfedge *e_bc = new halfedge(e_ca->next->next);
+  assert(!e_bc->inv||e_bc->inv->inv==e_bc);
+  e_ca->next->next->new_e = e_bc;
+  halfedge *e_cd = new halfedge(e_ac->next);
+  assert(!e_cd->inv||e_cd->inv->inv==e_cd);
+  e_ac->next->new_e = e_cd;
+  halfedge *e_da = new halfedge(e_ac->next->next);
+  assert(!e_da->inv||e_da->inv->inv==e_da);
+  e_ac->next->next->new_e = e_da;
 
-  make_triangle(e_ab,e_bd,e_da,f_abc);
-  make_triangle(e_cd,e_db,e_bc,f_acd);
+  face *f_abd = new face(e_bd);
+  e_ca->next->f = f_abd;
+  e_ac->next->next->f = f_abd;
+  make_triangle(e_ab,e_bd,e_da,f_abd);
 
-  f_abc->e = e_bd;
-  f_acd->e = e_db;
-  delete *e_ca;
-  *e_ca = e_bd;
-  delete *e_ac;
-  *e_ac = e_db;
+  face *f_cdb = new face(e_db);
+  e_ac->next->f = f_cdb;
+  e_ca->next->next->f = f_cdb;
+  make_triangle(e_cd,e_db,e_bc,f_cdb);
+
+  f_cab->child[0] = f_abd;
+  f_cab->child[1] = f_cdb;
+  f_cab->is_leaf = false;
+
+  f_acd->child[0] = f_abd;
+  f_acd->child[1] = f_cdb;
+  f_acd->is_leaf = false;
+
+  return std::make_tuple(f_abd,f_cdb,e_bd,e_db);
 }
 
 
@@ -85,30 +104,35 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
 
   int cnt = 1;
   for(const auto &point:points){
-    if((cnt%100) == 0) {
+    if((cnt%10000) == 0) {
       std::cerr << cnt << std::endl;
     }
     cnt++;
 
-    face *f = nullptr;
-    int idx;
-    for(int i=0;i<faces.size();++i){
-      if(faces[i]->contains(point.first,point.second)){
-        idx = i;
-        f = faces[i];
-        break;
+    face *f = st;
+    int d=0;
+    while(!f->is_leaf) {
+      face *pref = f;
+      for(int i=0;i<3;++i){
+        if(f->child[i]&&f->child[i]->contains(point.first,point.second)){
+          f = f->child[i];
+          break;
+        }
       }
-    }
-    if(f == nullptr){
-      std::cerr << "something wrong" << std::endl;
-      std::abort();
+      if(pref == f){
+        std::cerr << "something wrong" << std::endl;
+        std::abort();
+      }
     }
 
     vertex *p = new vertex(point.first,point.second);
 
-    halfedge *e_ab = f->e;
-    halfedge *e_bc = e_ab->next;
-    halfedge *e_ca = e_bc->next;
+    halfedge *e_ab = new halfedge(f->e);
+    f->e->new_e = e_ab;
+    halfedge *e_bc = new halfedge(f->e->next);
+    f->e->next->new_e = e_bc;
+    halfedge *e_ca = new halfedge(f->e->next->next);
+    f->e->next->next->new_e = e_ca;
 
     face *f_abp = new face(e_ab);
     halfedge *e_bp = new halfedge(e_bc->v);
@@ -125,6 +149,11 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
     halfedge *e_pc = new halfedge(p);
     make_triangle(e_ca,e_ap,e_pc,f_cap);
 
+    f->child[0] = f_abp;
+    f->child[1] = f_bcp;
+    f->child[2] = f_cap;
+    f->is_leaf = false;
+
     e_ap->inv = e_pa;
     e_pa->inv = e_ap;
 
@@ -134,45 +163,61 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
     e_cp->inv = e_pc;
     e_pc->inv = e_cp;
 
-    delete f;
-    f = nullptr;
-
-    faces[idx] = f_abp;
+    faces.push_back(f_abp);
     faces.push_back(f_bcp);
     faces.push_back(f_cap);
 
-    std::stack<halfedge*> edgestack;
-    edgestack.push(e_ab);
-    edgestack.push(e_bc);
-    edgestack.push(e_ca);
+    std::vector<halfedge*> edgestack;
+    edgestack.push_back(e_ab);
+    edgestack.push_back(e_bc);
+    edgestack.push_back(e_ca);
+
+    assert(!e_ab->inv||e_ab->inv->inv==e_ab);
+    assert(!e_bc->inv||e_bc->inv->inv==e_bc);
+    assert(!e_ca->inv||e_ca->inv->inv==e_ca);
 
     while(!edgestack.empty()){
-      halfedge *e1 = edgestack.top();edgestack.pop();
-      face *f1 = e1->f;
-      if(e1->inv == nullptr) continue;
-      halfedge *e2 = e1->inv;
-      face *f2 = e2->f;
+      halfedge *e_ca = edgestack.back();edgestack.pop_back();
+      while(e_ca->new_e){
+        e_ca = e_ca->new_e;
+      }
+      face *f_cab = e_ca->f;
+      assert(f_cab->is_leaf);
 
-      if(f1->contains(e2->next->next->v)){
-        flip(f1,f2,&e1,&e2);
+      if(e_ca->inv == nullptr) continue;
+      assert(e_ca->inv->inv == e_ca);
+      halfedge *e_ac = e_ca->inv;
 
-        halfedge *e_da = e1;
+      face *f_acd = e_ac->f;
+
+      assert(f_acd->is_leaf);
+      if(f_cab->contains(e_ac->next->next->v)){
+        face *f_abd,*f_cdb;
+        halfedge *e_bd,*e_db;
+        std::tie(f_abd,f_cdb,e_bd,e_db) = flip(f_cab,f_acd,e_ca,e_ac);
+
+        faces.push_back(f_abd);
+        faces.push_back(f_cdb);
+        halfedge *e_da = e_bd->next;
         halfedge *e_ab = e_da->next;
-        halfedge *e_bd = e_ab->next;
 
-        halfedge *e_ad = e2;
-        halfedge *e_dc = e_ad->next;
-        halfedge *e_ca = e_dc->next;
+        halfedge *e_bc = e_db->next;
+        halfedge *e_cd = e_bc->next;
 
-        edgestack.push(e_ab);
-        edgestack.push(e_bd);
-        edgestack.push(e_dc);
-        edgestack.push(e_ca);
+        edgestack.push_back(e_da);
+        assert(!e_da->inv||e_da->inv->f->is_leaf);
+        edgestack.push_back(e_ab);
+        assert(!e_ab->inv||e_ab->inv->f->is_leaf);
+        edgestack.push_back(e_bc);
+        assert(!e_bc->inv||e_bc->inv->f->is_leaf);
+        edgestack.push_back(e_cd);
+        assert(!e_cd->inv||e_cd->inv->f->is_leaf);
       }
     }
   }
 
   for(int i=0;i<faces.size();++i){
+    if(!faces[i]->is_leaf) continue;
     auto zs = faces[i]->get_points();
     bool has_super = false;
     for(int j=0;j<3;++j){
@@ -189,5 +234,4 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
     std::cout << std::endl;
   }
 }
-
 

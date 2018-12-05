@@ -9,8 +9,7 @@ struct vertex {
   std::complex<double> z;
   vertex(const std::complex<double> &z):z(z){}
   vertex(double x,double y):z(x,y){}
-  ~vertex() {
-  }
+  ~vertex(){}
 };
 
 struct face;
@@ -20,18 +19,24 @@ struct halfedge {
   face *f;
   halfedge *inv;
   halfedge *next;
-  halfedge(vertex *v,face *f=nullptr,halfedge *inv=nullptr,halfedge *next=nullptr):v(v),f(f),inv(inv),next(next){}
-  ~halfedge() {
+  halfedge *new_e;
+  halfedge(halfedge * const e):v(e->v),f(nullptr),inv(nullptr),next(nullptr),new_e(nullptr) {
+    if(e->inv){
+      inv = e->inv;
+      e->inv->inv = this;
+    }
   }
+  halfedge(vertex *v,face *f=nullptr,halfedge *inv=nullptr,halfedge *next=nullptr):v(v),f(f),inv(inv),next(next),new_e(nullptr) {}
+  ~halfedge() {}
 };
 
 struct face {
   halfedge *e;
-  face(halfedge *e=nullptr):e(e){
-  }
-  ~face() {
-  }
-  std::array<std::complex<double>,3> get_points()const{
+  face *child[3]; // 探索用
+  bool is_leaf; // 探索用
+  face(halfedge *e=nullptr):e(e),child{nullptr,nullptr,nullptr},is_leaf(true) {}
+  ~face() {}
+  std::array<std::complex<double>,3> get_points() const{
     std::array<std::complex<double>,3> zs;
     halfedge *te = e;
     for(int i=0;i<3;++i){
