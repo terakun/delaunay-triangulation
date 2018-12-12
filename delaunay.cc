@@ -93,12 +93,10 @@ face* super_triangle(const std::vector<std::pair<double,double>> &points) {
 }
 
 void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
-  std::vector<face*> faces;
   face *st = super_triangle(points);
   std::array<std::complex<double>,3> stz{
     st->e->v->z , st->e->next->v->z , st->e->next->next->v->z
   };
-  faces.push_back(st);
 
   int id = 0;
   for(const auto &point:points){
@@ -160,10 +158,6 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
     e_cp->inv = e_pc;
     e_pc->inv = e_cp;
 
-    faces.push_back(f_abp);
-    faces.push_back(f_bcp);
-    faces.push_back(f_cap);
-
     std::vector<halfedge*> edgestack;
     edgestack.push_back(e_ab);
     edgestack.push_back(e_bc);
@@ -186,8 +180,6 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
         halfedge *e_bd,*e_db;
         std::tie(f_abd,f_cdb,e_bd,e_db) = flip(f_cab,f_acd,e_ca,e_ac);
 
-        faces.push_back(f_abd);
-        faces.push_back(f_cdb);
         halfedge *e_da = e_bd->next;
         halfedge *e_ab = e_da->next;
 
@@ -204,28 +196,40 @@ void delaunay_triangulate(const std::vector<std::pair<double,double>> &points) {
 
   std::ofstream ofs_plot("plot.txt");
   std::vector<std::vector<size_t>> graph(points.size());
-  for(const auto& f:faces) {
-    if(!f->is_leaf) continue;
-    auto zs = f->get_points();
-    bool has_super = false;
-    for(int j=0;j<3;++j){
-      for(int k=0;k<3;++k){
-        if(zs[j] == stz[k]){
-          has_super = true;
-          break;
+  std::vector<face*> s;
+  s.push_back(st);
+  while(!s.empty()){
+    face* f = s.back(); s.pop_back();
+    if(!f->is_leaf){
+      for(int i=0;i<3;++i){
+        if(f->child[i]){
+          s.push_back(f->child[i]);
         }
       }
+    }else{
+      f->is_leaf = false;
+      auto zs = f->get_points();
+      bool has_super = false;
+      for(int j=0;j<3;++j){
+        for(int k=0;k<3;++k){
+          if(zs[j] == stz[k]){
+            has_super = true;
+            break;
+          }
+        }
+      }
+      if(has_super) continue;
+      halfedge *e = f->e;
+      for(int i=0;i<3;++i){
+        graph[e->v->id].push_back(e->next->v->id);
+        graph[e->next->v->id].push_back(e->v->id);
+        e = e->next;
+      }
+      for(int i=0;i<3;++i) ofs_plot << zs[i].real() << " " << zs[i].imag() << std::endl;
+      ofs_plot << zs[0].real() << " " << zs[0].imag() << std::endl;
+      ofs_plot << std::endl;
+
     }
-    if(has_super) continue;
-    halfedge *e = f->e;
-    for(int i=0;i<3;++i){
-      graph[e->v->id].push_back(e->next->v->id);
-      graph[e->next->v->id].push_back(e->v->id);
-      e = e->next;
-    }
-    for(int i=0;i<3;++i) ofs_plot << zs[i].real() << " " << zs[i].imag() << std::endl;
-    ofs_plot << zs[0].real() << " " << zs[0].imag() << std::endl;
-    ofs_plot << std::endl;
   }
 
   std::ofstream ofs_graph("graph.txt");
